@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MoviMoon Smart Player - 61 Servers</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;color:#fff;font-family:Inter,system-ui,Segoe UI,Arial;overflow:hidden}
+.player-wrapper{position:relative;width:100%;height:100vh;background:#000;overflow:hidden}
+#main-iframe{width:100%;height:100%;border:0;background:#000}
+.loader{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0a0a0a;z-index:10;gap:16px}
+.spinner{width:48px;height:48px;border:4px solid #222;border-top-color:#00d4aa;border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loader-text{font-size:14px;color:#aaa;text-align:center;line-height:1.6;max-width:80%}
+.server-dropdown{position:absolute;top:12px;right:12px;z-index:20;background:rgba(12,12,12,0.95);backdrop-filter:blur(12px);border:1px solid #2a2a2a;border-radius:12px;min-width:300px;max-width:92vw;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+.dropdown-header{padding:12px 16px;border-bottom:1px solid #222;display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+.dropdown-header h3{font-size:13px;font-weight:600}
+.badge{background:#00d4aa;color:#000;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dropdown-list{max-height:360px;overflow-y:auto;display:none}
+.dropdown-list.open{display:block}
+.server-item{padding:10px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;border-bottom:1px solid #151515;transition:0.2s;gap:10px}
+.server-item:hover{background:#1a1a1a}
+.server-item.active{background:#00d4aa18;border-left:3px solid #00d4aa}
+.server-name{font-size:13px;font-weight:500;display:flex;align-items:center;gap:8px}
+.server-status{font-size:10px;padding:3px 8px;border-radius:8px;background:#1e1e1e;color:#0f0;flex-shrink:0}
+.server-item.active .server-status{background:#00d4aa;color:#000}
+.server-type{font-size:9px;color:#666;margin-left:4px}
+.info-bar{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.95));padding:22px 16px 12px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#888;z-index:15;pointer-events:none}
+.btn-reload{position:absolute;top:12px;left:12px;z-index:20;background:rgba(0,0,0,.8);border:1px solid #333;color:#fff;padding:8px 12px;border-radius:8px;font-size:12px;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="player-wrapper">
+  <button class="btn-reload" onclick="location.reload()"><i class="fa fa-rotate"></i> Reload</button>
+  <div id="loader" class="loader">
+    <div class="spinner"></div>
+    <div id="loader-text">🔍 61 Servers থেকে Best খুঁজছি...<br><span id="loader-sub">TMDB ID থেকে Title/IMDB তে Convert হচ্ছে</span></div>
+  </div>
+  <iframe id="main-iframe" allowfullscreen allow="autoplay; encrypted-media; fullscreen; picture-in-picture"></iframe>
+  <div class="server-dropdown" id="dropdown">
+    <div class="dropdown-header" onclick="toggleDropdown()">
+      <h3><i class="fa fa-server"></i> Servers <span id="count">- Loading...</span></h3>
+      <span class="badge" id="current-server">Loading</span>
+    </div>
+    <div class="dropdown-list" id="server-list"></div>
+  </div>
+  <div class="info-bar">
+    <span id="info-title">MoviMoon Smart Player - 61 Servers Priority</span>
+    <span id="info-count">0 servers</span>
+  </div>
+</div>
+<script>
+// ===== CONFIG - এখানে তোমার Backend URL বসাবে =====
+const BACKEND_URL = 'https://movimoon-backend.onrender.com'; // LIVE ✅ // <-- Render এ Backend Deploy এর পর এটা চেঞ্জ করো
+// Optional: যদি একই Render এ backend+frontend একসাথে রাখতে চাও তাহলে window.location.origin ব্যবহার করবে
+
+const urlParams = new URLSearchParams(location.search);
+const tmdbId = urlParams.get('tmdb') || urlParams.get('id') || '550';
+const type = (urlParams.get('type') || 'movie').toLowerCase();
+const season = urlParams.get('s') || urlParams.get('season') || '1';
+const episode = urlParams.get('e') || urlParams.get('episode') || '1';
+
+let serversData = null;
+
+async function init(){
+  try{
+    document.getElementById('loader-sub').innerText = `TMDB: ${tmdbId} - ${type.toUpperCase()} S${season} E${episode}`;
+    const apiUrl = `${BACKEND_URL}/api/resolve?tmdb=${tmdbId}&type=${type}&s=${season}&e=${episode}`;
+    console.log('[Player] Calling Backend:', apiUrl);
+    const res = await fetch(apiUrl);
+    if(!res.ok) throw new Error('Backend '+res.status);
+    const data = await res.json();
+    serversData = data;
+    console.log('[Player] Data:', data);
+
+    if(!data.defaultServer){
+      document.getElementById('loader-text').innerHTML = '❌ কোনো Server এ Movie পাওয়া যায়নি<br>TMDB ID ভুল হতে পারে';
+      return;
+    }
+    playServer(data.defaultServer);
+    renderDropdown(data.availableServers, data.defaultServer);
+    document.getElementById('info-title').innerText = `${data.title || 'Movie'} ${data.year ? '('+data.year+')' : ''} - ${data.imdbId || ''}`;
+    document.getElementById('info-count').innerText = `${data.workingCount}/${data.totalChecked} servers ready`;
+
+  }catch(e){
+    console.error(e);
+    document.getElementById('loader-text').innerHTML = `❌ Error: ${e.message}<br><small>Backend Sleep হতে পারে, 30-50s পর Refresh করুন<br>${BACKEND_URL}</small>`;
+  }
+}
+
+function playServer(server){
+  const iframe = document.getElementById('main-iframe');
+  const loader = document.getElementById('loader');
+  loader.style.display = 'flex';
+  document.getElementById('loader-text').innerHTML = `▶️ Playing: <b>${server.name}</b><br><span style="font-size:11px;color:#666;word-break:break-all">${server.embedUrl.substring(0,80)}...</span>`;
+  iframe.src = server.embedUrl;
+  iframe.onload = ()=>{ loader.style.display = 'none'; };
+  setTimeout(()=> loader.style.display='none', 8000); // fallback hide
+
+  document.getElementById('current-server').innerText = server.name;
+  document.getElementById('count').innerText = `(${serversData.workingCount} working)`;
+  document.querySelectorAll('.server-item').forEach(el=>{
+    el.classList.toggle('active', el.dataset.name === server.name);
+  });
+}
+
+function renderDropdown(servers, defaultServer){
+  const list = document.getElementById('server-list');
+  list.innerHTML = '';
+  servers.forEach(s=>{
+    const div = document.createElement('div');
+    div.className = 'server-item' + (s.name === defaultServer.name ? ' active' : '');
+    div.dataset.name = s.name;
+    div.innerHTML = `
+      <span class="server-name"><i class="fa ${s.icon||'fa-play'}"></i> ${s.name} <span class="server-type">${s.type}</span></span>
+      <span class="server-status">● ${s.score>=199?'Priority':'Working'}</span>
+    `;
+    div.onclick = ()=>{ playServer(s); toggleDropdown(false); };
+    list.appendChild(div);
+  });
+  list.classList.add('open');
+  setTimeout(()=> list.classList.remove('open'), 4000);
+}
+
+function toggleDropdown(force){
+  const list = document.getElementById('server-list');
+  if(typeof force === 'boolean') list.classList.toggle('open', force);
+  else list.classList.toggle('open');
+}
+
+// Domain Lock (Optional) - শুধু তোমার সাইটে চলবে
+// Uncomment করলে শুধু movimoon.blogspot.com এ চলবে
+/*
+const allowed = ['movimoon.blogspot.com','localhost'];
+const ref = document.referrer;
+if(ref && !allowed.some(d=>ref.includes(d))){
+  document.getElementById('loader-text').innerHTML='❌ Unauthorized Domain';
+  throw new Error('Unauthorized');
+}
+*/
+
+init();
+</script>
+</body>
+</html>
